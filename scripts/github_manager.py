@@ -4,21 +4,22 @@
 GitHub Repository Manager
 =========================
 
-Lista automaticamente os repositórios do GitHub,
-permite selecionar vários pelo número e excluí-los
-em uma única operação.
+Gerenciador de repositórios para execução no GitHub Actions.
 
 Recursos:
-- Lista todos os repositórios
+- Lista automaticamente os repositórios da conta autenticada
 - Paginação automática
-- Mostra nome, visibilidade e descrição
-- Seleção por números
-- Suporta intervalos: 1,3,5-8
-- Seleção "todos"
-- Dupla confirmação
-- Verificação antes da exclusão
+- Seleção por número
+- Suporta:
+    3
+    1,3,5
+    1,3,5-10
+    todos
+- Executa sem input() no GitHub Actions
+- Usa SELECAO_REPOSITORIOS
+- Usa CONFIRMACAO
+- Exige confirmação explícita
 - Relatório final
-- Não grava o token no código
 """
 
 from __future__ import annotations
@@ -33,13 +34,23 @@ import requests
 # CONFIGURAÇÃO
 # ============================================================
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-
 API_URL = "https://api.github.com"
 
 PER_PAGE = 100
 
 DELAY_SECONDS = 0.5
+
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+
+SELECAO_REPOSITORIOS = os.getenv(
+    "SELECAO_REPOSITORIOS",
+    ""
+).strip()
+
+CONFIRMACAO = os.getenv(
+    "CONFIRMACAO",
+    ""
+).strip()
 
 
 # ============================================================
@@ -49,47 +60,44 @@ DELAY_SECONDS = 0.5
 HEADERS = {
     "Accept": "application/vnd.github+json",
     "Authorization": f"Bearer {GITHUB_TOKEN}",
-    "X-GitHub-Api-Version": "2026-03-10",
+    "X-GitHub-Api-Version": "2022-11-28",
 }
 
 
 # ============================================================
-# LIMPAR TERMINAL
+# ERRO
 # ============================================================
 
-def limpar_tela():
+def erro(mensagem: str):
 
-    if os.name == "nt":
-        os.system("cls")
-    else:
-        os.system("clear")
+    print()
+    print("=" * 70)
+    print("ERRO")
+    print("=" * 70)
+    print()
+    print(mensagem)
+    print()
+
+    sys.exit(1)
 
 
 # ============================================================
-# VERIFICAR CONFIGURAÇÃO
+# VALIDAR TOKEN
 # ============================================================
 
 def verificar_configuracao():
 
     if not GITHUB_TOKEN:
 
-        print()
-        print("ERRO: GITHUB_TOKEN não configurado.")
-        print()
-
-        print("Linux / Termux:")
-        print('export GITHUB_TOKEN="SEU_TOKEN"')
-        print()
-
-        print("Windows PowerShell:")
-        print('$env:GITHUB_TOKEN="SEU_TOKEN"')
-        print()
-
-        sys.exit(1)
+        erro(
+            "GITHUB_TOKEN não foi encontrado.\n\n"
+            "Verifique se o workflow contém:\n\n"
+            "GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}"
+        )
 
 
 # ============================================================
-# TESTAR TOKEN
+# OBTER USUÁRIO
 # ============================================================
 
 def obter_usuario():
@@ -104,19 +112,19 @@ def obter_usuario():
             timeout=30,
         )
 
-    except requests.RequestException as error:
+    except requests.RequestException as exc:
 
-        print(f"Erro de conexão: {error}")
-        sys.exit(1)
+        erro(
+            f"Erro de conexão ao autenticar no GitHub:\n{exc}"
+        )
 
     if response.status_code != 200:
 
-        print()
-        print("ERRO: token inválido ou sem acesso.")
-        print()
-        print(f"HTTP {response.status_code}")
-        print(response.text)
-        sys.exit(1)
+        erro(
+            "Não foi possível autenticar no GitHub.\n\n"
+            f"HTTP: {response.status_code}\n"
+            f"Resposta: {response.text}"
+        )
 
     return response.json()
 
@@ -141,7 +149,7 @@ def listar_repositorios():
             f"{API_URL}/user/repos"
             f"?per_page={PER_PAGE}"
             f"&page={page}"
-            f"&affiliation=owner,collaborator,organization_member"
+            f"&affiliation=owner"
             f"&sort=full_name"
             f"&direction=asc"
         )
@@ -154,20 +162,19 @@ def listar_repositorios():
                 timeout=30,
             )
 
-        except requests.RequestException as error:
+        except requests.RequestException as exc:
 
-            print(f"Erro de conexão: {error}")
-            sys.exit(1)
+            erro(
+                f"Erro ao consultar os repositórios:\n{exc}"
+            )
 
         if response.status_code != 200:
 
-            print()
-            print(
-                f"Erro ao buscar repositórios: "
-                f"HTTP {response.status_code}"
+            erro(
+                "Erro ao listar repositórios.\n\n"
+                f"HTTP: {response.status_code}\n"
+                f"Resposta: {response.text}"
             )
-            print(response.text)
-            sys.exit(1)
 
         dados = response.json()
 
@@ -200,7 +207,10 @@ def mostrar_repositorios(repositorios):
     print("                 SEUS REPOSITÓRIOS")
     print("=" * 90)
 
-    for i, repo in enumerate(repositorios, start=1):
+    for numero, repo in enumerate(
+        repositorios,
+        start=1
+    ):
 
         nome = repo.get("name", "")
 
@@ -210,22 +220,36 @@ def mostrar_repositorios(repositorios):
             else "PÚBLICO"
         )
 
-        descricao = repo.get("description") or ""
+        descricao = (
+            repo.get("description")
+            or ""
+        )
 
-        descricao = descricao.replace("\n", " ").strip()
+        descricao = (
+            descricao
+            .replace("\n", " ")
+            .strip()
+        )
 
         if len(descricao) > 45:
-            descricao = descricao[:42] + "..."
+
+            descricao = (
+                descricao[:42]
+                + "..."
+            )
 
         print(
-            f"{i:4d}. "
+            f"{numero:4d}. "
             f"{nome:<35} "
             f"{visibilidade:<8} "
             f"{descricao}"
         )
 
     print("=" * 90)
-    print(f"Total: {len(repositorios)} repositório(s)")
+    print(
+        f"Total: {len(repositorios)} "
+        "repositório(s)"
+    )
     print()
 
 
@@ -233,13 +257,35 @@ def mostrar_repositorios(repositorios):
 # INTERPRETAR SELEÇÃO
 # ============================================================
 
-def interpretar_selecao(entrada, total):
+def interpretar_selecao(
+    entrada: str,
+    total: int,
+):
 
-    entrada = entrada.strip().lower()
+    entrada = (
+        entrada
+        .strip()
+        .lower()
+    )
 
-    if entrada in ("todos", "tudo", "*"):
+    if not entrada:
 
-        return list(range(1, total + 1))
+        raise ValueError(
+            "Nenhuma seleção foi informada."
+        )
+
+    if entrada in (
+        "todos",
+        "tudo",
+        "*",
+    ):
+
+        return list(
+            range(
+                1,
+                total + 1
+            )
+        )
 
     numeros = set()
 
@@ -252,50 +298,105 @@ def interpretar_selecao(entrada, total):
         if not parte:
             continue
 
-        # Intervalo: 5-10
+        # ----------------------------------------------------
+        # INTERVALO
+        # ----------------------------------------------------
+
         if "-" in parte:
 
             extremos = parte.split("-")
 
             if len(extremos) != 2:
+
                 raise ValueError(
                     f"Intervalo inválido: {parte}"
                 )
 
-            inicio = int(extremos[0])
-            fim = int(extremos[1])
+            try:
+
+                inicio = int(
+                    extremos[0].strip()
+                )
+
+                fim = int(
+                    extremos[1].strip()
+                )
+
+            except ValueError:
+
+                raise ValueError(
+                    f"Intervalo inválido: {parte}"
+                )
 
             if inicio > fim:
-                inicio, fim = fim, inicio
 
-            for numero in range(inicio, fim + 1):
+                inicio, fim = (
+                    fim,
+                    inicio,
+                )
 
-                if numero < 1 or numero > total:
+            for numero in range(
+                inicio,
+                fim + 1
+            ):
+
+                if (
+                    numero < 1
+                    or numero > total
+                ):
+
                     raise ValueError(
-                        f"Número fora do intervalo: {numero}"
+                        f"Número fora do intervalo: "
+                        f"{numero}"
                     )
 
                 numeros.add(numero)
 
+        # ----------------------------------------------------
+        # NÚMERO INDIVIDUAL
+        # ----------------------------------------------------
+
         else:
 
-            numero = int(parte)
+            try:
 
-            if numero < 1 or numero > total:
+                numero = int(parte)
+
+            except ValueError:
+
                 raise ValueError(
-                    f"Número fora do intervalo: {numero}"
+                    f"Valor inválido: {parte}"
+                )
+
+            if (
+                numero < 1
+                or numero > total
+            ):
+
+                raise ValueError(
+                    f"Número fora do intervalo: "
+                    f"{numero}"
                 )
 
             numeros.add(numero)
+
+    if not numeros:
+
+        raise ValueError(
+            "Nenhum repositório foi selecionado."
+        )
 
     return sorted(numeros)
 
 
 # ============================================================
-# CONFIRMAR SELEÇÃO
+# MOSTRAR SELECIONADOS
 # ============================================================
 
-def mostrar_selecionados(repositorios, indices):
+def mostrar_selecionados(
+    repositorios,
+    indices,
+):
 
     print()
     print("=" * 70)
@@ -304,7 +405,9 @@ def mostrar_selecionados(repositorios, indices):
 
     for indice in indices:
 
-        repo = repositorios[indice - 1]
+        repo = repositorios[
+            indice - 1
+        ]
 
         print(
             f"{indice:4d}. "
@@ -313,7 +416,8 @@ def mostrar_selecionados(repositorios, indices):
 
     print("=" * 70)
     print(
-        f"Total selecionado: {len(indices)}"
+        f"Total selecionado: "
+        f"{len(indices)}"
     )
     print()
 
@@ -322,9 +426,14 @@ def mostrar_selecionados(repositorios, indices):
 # VERIFICAR REPOSITÓRIO
 # ============================================================
 
-def verificar_repositorio(full_name):
+def verificar_repositorio(
+    full_name: str
+):
 
-    url = f"{API_URL}/repos/{full_name}"
+    url = (
+        f"{API_URL}/repos/"
+        f"{full_name}"
+    )
 
     try:
 
@@ -334,16 +443,17 @@ def verificar_repositorio(full_name):
             timeout=30,
         )
 
-    except requests.RequestException as error:
+    except requests.RequestException as exc:
 
         print(
             f"  [ERRO DE CONEXÃO] "
-            f"{full_name}: {error}"
+            f"{full_name}: {exc}"
         )
 
         return False
 
     if response.status_code == 200:
+
         return True
 
     if response.status_code == 404:
@@ -367,9 +477,14 @@ def verificar_repositorio(full_name):
 # EXCLUIR REPOSITÓRIO
 # ============================================================
 
-def excluir_repositorio(full_name):
+def excluir_repositorio(
+    full_name: str
+):
 
-    url = f"{API_URL}/repos/{full_name}"
+    url = (
+        f"{API_URL}/repos/"
+        f"{full_name}"
+    )
 
     try:
 
@@ -379,15 +494,16 @@ def excluir_repositorio(full_name):
             timeout=30,
         )
 
-    except requests.RequestException as error:
+    except requests.RequestException as exc:
 
         print(
             f"  [ERRO DE CONEXÃO] "
-            f"{full_name}: {error}"
+            f"{full_name}: {exc}"
         )
 
         return False
 
+    # GitHub retorna 204 após exclusão
     if response.status_code == 204:
 
         print(
@@ -421,19 +537,22 @@ def excluir_repositorio(full_name):
     )
 
     if response.text:
-        print(f"  {response.text}")
+
+        print(
+            f"  Resposta: "
+            f"{response.text}"
+        )
 
     return False
 
 
 # ============================================================
-# PROGRAMA PRINCIPAL
+# MAIN
 # ============================================================
 
 def main():
 
-    limpar_tela()
-
+    print()
     print("=" * 70)
     print("             GITHUB REPOSITORY MANAGER")
     print("=" * 70)
@@ -441,15 +560,20 @@ def main():
     verificar_configuracao()
 
     # --------------------------------------------------------
-    # LOGIN
+    # AUTENTICAÇÃO
     # --------------------------------------------------------
 
     usuario = obter_usuario()
 
-    login = usuario.get("login", "desconhecido")
+    login = usuario.get(
+        "login",
+        "desconhecido",
+    )
 
     print()
-    print(f"Usuário autenticado: {login}")
+    print(
+        f"Usuário autenticado: {login}"
+    )
 
     # --------------------------------------------------------
     # LISTAR
@@ -459,29 +583,29 @@ def main():
 
     if not repositorios:
 
-        print()
-        print("Nenhum repositório encontrado.")
-        return
+        erro(
+            "Nenhum repositório encontrado."
+        )
 
-    mostrar_repositorios(repositorios)
+    mostrar_repositorios(
+        repositorios
+    )
 
     # --------------------------------------------------------
-    # SELEÇÃO
+    # SELEÇÃO PELO GITHUB ACTIONS
     # --------------------------------------------------------
 
-    print("FORMATO DE SELEÇÃO")
-    print()
-    print("Exemplos:")
-    print("  1")
-    print("  1,3,5")
-    print("  1,3,5-10")
-    print("  2-8")
-    print("  todos")
-    print()
+    entrada = (
+        SELECAO_REPOSITORIOS
+    )
 
-    entrada = input(
-        "Digite os números dos repositórios: "
-    ).strip()
+    print(
+        "Seleção recebida pelo workflow:"
+    )
+
+    print(
+        f"  {entrada}"
+    )
 
     try:
 
@@ -490,63 +614,35 @@ def main():
             len(repositorios),
         )
 
-    except ValueError as error:
+    except ValueError as exc:
 
-        print()
-        print(f"ERRO: {error}")
-        return
-
-    if not indices:
-
-        print()
-        print("Nenhum repositório selecionado.")
-        return
+        erro(str(exc))
 
     # --------------------------------------------------------
-    # MOSTRAR SELEÇÃO
+    # CONFIRMAÇÃO
     # --------------------------------------------------------
+
+    if CONFIRMACAO != "EXCLUIR":
+
+        erro(
+            "Confirmação inválida.\n\n"
+            "Para executar a exclusão, "
+            "o campo CONFIRMACAO deve ser:\n\n"
+            "EXCLUIR"
+        )
 
     mostrar_selecionados(
         repositorios,
         indices,
     )
 
-    # --------------------------------------------------------
-    # PRIMEIRA CONFIRMAÇÃO
-    # --------------------------------------------------------
-
-    confirmacao = input(
-        'Digite "CONFIRMAR" para continuar: '
-    ).strip()
-
-    if confirmacao != "CONFIRMAR":
-
-        print()
-        print("Operação cancelada.")
-        return
-
-    # --------------------------------------------------------
-    # SEGUNDA CONFIRMAÇÃO
-    # --------------------------------------------------------
-
-    print()
-    print("⚠️  ATENÇÃO!")
-    print()
     print(
-        "Os repositórios selecionados serão "
-        "excluídos através da API do GitHub."
+        "Confirmação recebida:"
     )
-    print()
 
-    confirmacao_final = input(
-        'Digite "EXCLUIR DEFINITIVAMENTE": '
-    ).strip()
-
-    if confirmacao_final != "EXCLUIR DEFINITIVAMENTE":
-
-        print()
-        print("Operação cancelada.")
-        return
+    print(
+        "  EXCLUIR"
+    )
 
     # --------------------------------------------------------
     # VERIFICAÇÃO
@@ -562,21 +658,33 @@ def main():
 
     for indice in indices:
 
-        repo = repositorios[indice - 1]
+        repo = repositorios[
+            indice - 1
+        ]
 
-        full_name = repo["full_name"]
+        full_name = repo[
+            "full_name"
+        ]
 
-        print(f"Verificando: {full_name}")
+        print(
+            f"Verificando: "
+            f"{full_name}"
+        )
 
-        if verificar_repositorio(full_name):
+        if verificar_repositorio(
+            full_name
+        ):
 
-            validos.append(full_name)
+            validos.append(
+                full_name
+            )
 
     if not validos:
 
-        print()
-        print("Nenhum repositório está disponível para exclusão.")
-        return
+        erro(
+            "Nenhum repositório válido "
+            "está disponível para exclusão."
+        )
 
     # --------------------------------------------------------
     # EXCLUSÃO
@@ -589,21 +697,33 @@ def main():
     print()
 
     excluidos = []
+
     falhas = []
 
     for full_name in validos:
 
-        print(f"Processando: {full_name}")
+        print(
+            f"Processando: "
+            f"{full_name}"
+        )
 
-        if excluir_repositorio(full_name):
+        if excluir_repositorio(
+            full_name
+        ):
 
-            excluidos.append(full_name)
+            excluidos.append(
+                full_name
+            )
 
         else:
 
-            falhas.append(full_name)
+            falhas.append(
+                full_name
+            )
 
-        time.sleep(DELAY_SECONDS)
+        time.sleep(
+            DELAY_SECONDS
+        )
 
     # --------------------------------------------------------
     # RELATÓRIO
@@ -611,39 +731,49 @@ def main():
 
     print()
     print("=" * 70)
-    print("                         RESULTADO")
+    print("                     RESULTADO")
     print("=" * 70)
     print()
 
     print(
-        f"Selecionados:       {len(indices)}"
+        f"Selecionados: {len(indices)}"
     )
 
     print(
-        f"Excluídos:          {len(excluidos)}"
+        f"Excluídos:    {len(excluidos)}"
     )
 
     print(
-        f"Falhas:             {len(falhas)}"
+        f"Falhas:       {len(falhas)}"
     )
 
     print()
 
     if excluidos:
 
-        print("REPOSITÓRIOS EXCLUÍDOS:")
+        print(
+            "REPOSITÓRIOS EXCLUÍDOS:"
+        )
 
         for repo in excluidos:
-            print(f"  ✓ {repo}")
+
+            print(
+                f"  ✓ {repo}"
+            )
 
         print()
 
     if falhas:
 
-        print("REPOSITÓRIOS QUE NÃO FORAM EXCLUÍDOS:")
+        print(
+            "REPOSITÓRIOS COM FALHA:"
+        )
 
         for repo in falhas:
-            print(f"  ✗ {repo}")
+
+            print(
+                f"  ✗ {repo}"
+            )
 
         print()
 
@@ -657,4 +787,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
