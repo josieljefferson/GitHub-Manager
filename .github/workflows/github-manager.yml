@@ -7,14 +7,14 @@ on:
     inputs:
 
       repositorios:
-        description: 'Números dos repositórios. Ex: 1,3,5-8 ou todos'
+        description: 'Números: 3 ou 1,3,5-8 ou todos'
         required: true
-        default: ''
+        type: string
 
       confirmacao:
-        description: 'Digite EXCLUIR para confirmar'
+        description: 'Digite EXCLUIR'
         required: true
-        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
       - name: 🐍 Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: 📦 Instalar requests
         run: |
@@ -44,8 +44,12 @@ jobs:
 
       - name: 🗑️ Executar gerenciador
         env:
+
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+
           SELECAO_REPOSITORIOS: ${{ inputs.repositorios }}
+
           CONFIRMACAO: ${{ inputs.confirmacao }}
+
         run: |
           python scripts/github_manager.py
